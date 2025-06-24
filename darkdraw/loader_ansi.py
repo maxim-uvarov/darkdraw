@@ -15,10 +15,30 @@ class ANSIParser:
         self.rows = []
         self.max_x = 0
         self.max_y = 0
+    
+    def rgb_to_256(self, r, g, b):
+        """Convert RGB to nearest 256 color index"""
+        # Handle grayscale
+        if r == g == b:
+            if r < 8:
+                return 16
+            if r > 248:
+                return 231
+            return round(((r - 8) / 247) * 24) + 232
+        
+        # Handle colors - map to 6x6x6 color cube
+        def to_6level(val):
+            return round(val / 51)
+        
+        r6 = to_6level(r)
+        g6 = to_6level(g)
+        b6 = to_6level(b)
+        
+        return 16 + (36 * r6) + (6 * g6) + b6
         
     def parse(self, content):
         # ANSI escape sequence patterns
-        csi_pattern = re.compile(r'\x1b\[([0-9;]*)([A-Za-z])')  # CSI sequences
+        csi_pattern = re.compile(r'\x1b\[([0-9;:]*)([A-Za-z])')  # CSI sequences (including malformed with colons)
         osc_pattern = re.compile(r'\x1b\]([^\x07\x1b]*(?:\x07|\x1b\\))')  # OSC sequences
         charset_pattern = re.compile(r'\x1b[()][AB012]')  # Character set selection
         
@@ -28,7 +48,9 @@ class ANSIParser:
             # Look for CSI escape sequence
             match = csi_pattern.match(content, i)
             if match:
-                params = match.group(1).split(';') if match.group(1) else ['']
+                # Replace colons with semicolons for malformed RGB sequences
+                params_str = match.group(1).replace(':', ';')
+                params = params_str.split(';') if params_str else ['']
                 command = match.group(2)
                 self.handle_escape_sequence(params, command)
                 i = match.end()
@@ -117,8 +139,18 @@ class ANSIParser:
             elif code == 38:  # Extended foreground color
                 # Need to check next parameters
                 idx = params.index(str(code))
-                if idx + 2 < len(params) and params[idx + 1] == '5':
-                    self.fg_color = int(params[idx + 2])
+                if idx + 1 < len(params):
+                    if params[idx + 1] == '5' and idx + 2 < len(params):
+                        # 256 color mode
+                        self.fg_color = int(params[idx + 2]) if params[idx + 2] else None
+                    elif params[idx + 1] == '2':
+                        # RGB/truecolor mode - we'll approximate to 256 colors
+                        if idx + 4 < len(params):
+                            r = int(params[idx + 2]) if params[idx + 2] else 153
+                            g = int(params[idx + 3]) if params[idx + 3] else 153
+                            b = int(params[idx + 4]) if params[idx + 4] else 153
+                            # Convert RGB to nearest 256 color
+                            self.fg_color = self.rgb_to_256(r, g, b)
             elif code == 39:  # Default foreground
                 self.fg_color = None
             elif 40 <= code <= 47:  # Standard background colors
@@ -126,8 +158,18 @@ class ANSIParser:
             elif code == 48:  # Extended background color
                 # Need to check next parameters
                 idx = params.index(str(code))
-                if idx + 2 < len(params) and params[idx + 1] == '5':
-                    self.bg_color = int(params[idx + 2])
+                if idx + 1 < len(params):
+                    if params[idx + 1] == '5' and idx + 2 < len(params):
+                        # 256 color mode
+                        self.bg_color = int(params[idx + 2]) if params[idx + 2] else None
+                    elif params[idx + 1] == '2':
+                        # RGB/truecolor mode - we'll approximate to 256 colors
+                        if idx + 4 < len(params):
+                            r = int(params[idx + 2]) if params[idx + 2] else 153
+                            g = int(params[idx + 3]) if params[idx + 3] else 153
+                            b = int(params[idx + 4]) if params[idx + 4] else 153
+                            # Convert RGB to nearest 256 color
+                            self.bg_color = self.rgb_to_256(r, g, b)
             elif code == 49:  # Default background
                 self.bg_color = None
             elif 90 <= code <= 97:  # Bright foreground colors
