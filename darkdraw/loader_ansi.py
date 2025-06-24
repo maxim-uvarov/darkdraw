@@ -1,4 +1,5 @@
 import re
+
 from visidata import VisiData, vd, AttrDict
 from .drawing import Drawing, DrawingSheet
 
@@ -17,7 +18,7 @@ class ANSIParser:
         self.max_y = 0
     
     def rgb_to_256(self, r, g, b):
-        """Convert RGB to nearest 256 color index"""
+        'Convert RGB to nearest 256 color index.'
         # Handle grayscale
         if r == g == b:
             if r < 8:
@@ -27,12 +28,9 @@ class ANSIParser:
             return round(((r - 8) / 247) * 24) + 232
         
         # Handle colors - map to 6x6x6 color cube
-        def to_6level(val):
-            return round(val / 51)
-        
-        r6 = to_6level(r)
-        g6 = to_6level(g)
-        b6 = to_6level(b)
+        r6 = round(r / 51)
+        g6 = round(g / 51)
+        b6 = round(b / 51)
         
         return 16 + (36 * r6) + (6 * g6) + b6
         
@@ -88,33 +86,51 @@ class ANSIParser:
         if command == 'm':  # SGR - Select Graphic Rendition
             self.handle_sgr(params)
         elif command == 'H' or command == 'f':  # Cursor position
-            y = int(params[0]) - 1 if params[0] else 0
-            x = int(params[1]) - 1 if len(params) > 1 and params[1] else 0
-            self.x = x
-            self.y = y
+            try:
+                y = int(params[0]) - 1 if params[0] else 0
+                x = int(params[1]) - 1 if len(params) > 1 and params[1] else 0
+                self.x = max(0, x)
+                self.y = max(0, y)
+            except (ValueError, IndexError):
+                pass
         elif command == 'J':  # Clear screen
-            if params[0] == '2':
+            if params and params[0] == '2':
                 # Clear entire screen - we just reset position
                 self.x = 0
                 self.y = 0
         elif command == 'C':  # Cursor forward
-            n = int(params[0]) if params[0] else 1
-            self.x += n
+            try:
+                n = int(params[0]) if params[0] else 1
+                self.x += n
+            except ValueError:
+                pass
         elif command == 'D':  # Cursor backward
-            n = int(params[0]) if params[0] else 1
-            self.x = max(0, self.x - n)
+            try:
+                n = int(params[0]) if params[0] else 1
+                self.x = max(0, self.x - n)
+            except ValueError:
+                pass
         elif command == 'A':  # Cursor up
-            n = int(params[0]) if params[0] else 1
-            self.y = max(0, self.y - n)
+            try:
+                n = int(params[0]) if params[0] else 1
+                self.y = max(0, self.y - n)
+            except ValueError:
+                pass
         elif command == 'B':  # Cursor down
-            n = int(params[0]) if params[0] else 1
-            self.y += n
+            try:
+                n = int(params[0]) if params[0] else 1
+                self.y += n
+            except ValueError:
+                pass
     
     def handle_sgr(self, params):
         for param in params:
             if not param:
                 param = '0'
-            code = int(param)
+            try:
+                code = int(param)
+            except ValueError:
+                continue
             
             if code == 0:  # Reset
                 self.fg_color = None
@@ -142,13 +158,19 @@ class ANSIParser:
                 if idx + 1 < len(params):
                     if params[idx + 1] == '5' and idx + 2 < len(params):
                         # 256 color mode
-                        self.fg_color = int(params[idx + 2]) if params[idx + 2] else None
+                        try:
+                            self.fg_color = int(params[idx + 2]) if params[idx + 2] else None
+                        except (ValueError, IndexError):
+                            pass
                     elif params[idx + 1] == '2':
                         # RGB/truecolor mode - we'll approximate to 256 colors
                         if idx + 4 < len(params):
-                            r = int(params[idx + 2]) if params[idx + 2] else 153
-                            g = int(params[idx + 3]) if params[idx + 3] else 153
-                            b = int(params[idx + 4]) if params[idx + 4] else 153
+                            try:
+                                r = int(params[idx + 2]) if params[idx + 2] else 153
+                                g = int(params[idx + 3]) if params[idx + 3] else 153
+                                b = int(params[idx + 4]) if params[idx + 4] else 153
+                            except (ValueError, IndexError):
+                                r = g = b = 153
                             # Convert RGB to nearest 256 color
                             self.fg_color = self.rgb_to_256(r, g, b)
             elif code == 39:  # Default foreground
@@ -161,13 +183,19 @@ class ANSIParser:
                 if idx + 1 < len(params):
                     if params[idx + 1] == '5' and idx + 2 < len(params):
                         # 256 color mode
-                        self.bg_color = int(params[idx + 2]) if params[idx + 2] else None
+                        try:
+                            self.bg_color = int(params[idx + 2]) if params[idx + 2] else None
+                        except (ValueError, IndexError):
+                            pass
                     elif params[idx + 1] == '2':
                         # RGB/truecolor mode - we'll approximate to 256 colors
                         if idx + 4 < len(params):
-                            r = int(params[idx + 2]) if params[idx + 2] else 153
-                            g = int(params[idx + 3]) if params[idx + 3] else 153
-                            b = int(params[idx + 4]) if params[idx + 4] else 153
+                            try:
+                                r = int(params[idx + 2]) if params[idx + 2] else 153
+                                g = int(params[idx + 3]) if params[idx + 3] else 153
+                                b = int(params[idx + 4]) if params[idx + 4] else 153
+                            except (ValueError, IndexError):
+                                r = g = b = 153
                             # Convert RGB to nearest 256 color
                             self.bg_color = self.rgb_to_256(r, g, b)
             elif code == 49:  # Default background
@@ -202,14 +230,7 @@ class ANSIParser:
         color = ' '.join(color_parts) if color_parts else ''
         
         # Create row
-        row = AttrDict(
-            type='',
-            x=self.x,
-            y=self.y,
-            text=ch,
-            color=color,
-            tags=[]
-        )
+        row = AttrDict(type='', x=self.x, y=self.y, text=ch, color=color, tags=[])
         
         self.rows.append(row)
         
@@ -225,26 +246,25 @@ def open_ansi(vd, p):
 
 @VisiData.api
 def open_ans(vd, p):
-    """Open ANSI art files (.ans, .ansi)"""
+    'Open ANSI art files (.ans, .ansi).'
     content = p.read_bytes()
     
     # Try different encodings - prioritize UTF-8 for modern captures
+    text = None
     for encoding in ['utf-8', 'cp437', 'latin-1']:
         try:
             text = content.decode(encoding)
             break
         except UnicodeDecodeError:
             continue
-    else:
-        # Default to utf-8 with error handling
+    
+    if text is None:
         text = content.decode('utf-8', errors='replace')
+        vd.warning(f'Using UTF-8 with replacement for {p.name}')
     
     # Parse ANSI sequences
     parser = ANSIParser()
     rows = parser.parse(text)
     
-    # Create DrawingSheet
     sheet = DrawingSheet(p.name, rows=rows)
-    
-    # Return Drawing instance
     return Drawing(p.name, source=sheet)
