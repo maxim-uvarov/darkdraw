@@ -17,31 +17,48 @@ class ANSIParser:
         self.max_y = 0
         
     def parse(self, content):
-        # ANSI escape sequence pattern
-        ansi_pattern = re.compile(r'\x1b\[([0-9;]*)([A-Za-z])')
+        # ANSI escape sequence patterns
+        csi_pattern = re.compile(r'\x1b\[([0-9;]*)([A-Za-z])')  # CSI sequences
+        osc_pattern = re.compile(r'\x1b\]([^\x07\x1b]*(?:\x07|\x1b\\))')  # OSC sequences
+        charset_pattern = re.compile(r'\x1b[()][AB012]')  # Character set selection
+        
         i = 0
         
         while i < len(content):
-            # Look for escape sequence
-            match = ansi_pattern.match(content, i)
-            
+            # Look for CSI escape sequence
+            match = csi_pattern.match(content, i)
             if match:
                 params = match.group(1).split(';') if match.group(1) else ['']
                 command = match.group(2)
                 self.handle_escape_sequence(params, command)
                 i = match.end()
-            else:
-                # Regular character
-                ch = content[i]
-                if ch == '\n':
-                    self.y += 1
-                    self.x = 0
-                elif ch == '\r':
-                    self.x = 0
-                elif ch != '\x1b' and ord(ch) >= 32:  # Printable character
+                continue
+            
+            # Skip OSC sequences (window title, etc.)
+            match = osc_pattern.match(content, i)
+            if match:
+                i = match.end()
+                continue
+            
+            # Skip charset selection sequences
+            match = charset_pattern.match(content, i)
+            if match:
+                i = match.end()
+                continue
+            
+            # Regular character
+            ch = content[i]
+            if ch == '\n':
+                self.y += 1
+                self.x = 0
+            elif ch == '\r':
+                self.x = 0
+            elif ch != '\x1b':  # Any non-escape character
+                # Handle both ASCII and Unicode characters
+                if ord(ch) >= 32 or ch in '\t':  # Printable or tab
                     self.add_character(ch)
                     self.x += 1
-                i += 1
+            i += 1
         
         return self.rows
     
@@ -169,16 +186,16 @@ def open_ans(vd, p):
     """Open ANSI art files (.ans, .ansi)"""
     content = p.read_bytes()
     
-    # Try different encodings
-    for encoding in ['cp437', 'latin-1', 'utf-8']:
+    # Try different encodings - prioritize UTF-8 for modern captures
+    for encoding in ['utf-8', 'cp437', 'latin-1']:
         try:
             text = content.decode(encoding)
             break
         except UnicodeDecodeError:
             continue
     else:
-        # Default to latin-1 with error handling
-        text = content.decode('latin-1', errors='replace')
+        # Default to utf-8 with error handling
+        text = content.decode('utf-8', errors='replace')
     
     # Parse ANSI sequences
     parser = ANSIParser()
